@@ -2,12 +2,6 @@
 
 AI-powered code security and optimization analyzer.
 
-## Installation
-
-```bash
-pip install -e .
-```
-
 ## Usage
 
 ```bash
