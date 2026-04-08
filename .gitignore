@@ -41,6 +41,7 @@ Thumbs.db
 
 # Review/Docs (don't commit generated docs)
 REVIEW.md
+progress.md
 docs/
 
 # Environment
