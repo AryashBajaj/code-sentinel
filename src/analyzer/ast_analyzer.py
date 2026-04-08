@@ -6,7 +6,8 @@ versions.
 """
 import ast
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+from .taint import TaintTracker
 
 
 class PythonAstAnalyzer:
@@ -54,13 +55,34 @@ class _ASTVisitor(ast.NodeVisitor):
         self.file_path = file_path
         self.lines = lines
         self.findings = findings
+        self._taint: Optional[TaintTracker] = None
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        # Begin a new taint-tracking context for this function
+        self._taint = TaintTracker(self.file_path)
+        if node.name:
+            self._taint.start_function(node.name)
+        # CSRF protection check: warn if a view is decorated with csrf_exempt
+        for dec in getattr(node, 'decorator_list', []):
+            dec_name = None
+            if isinstance(dec, ast.Name):
+                dec_name = dec.id
+            elif isinstance(dec, ast.Attribute):
+                dec_name = dec.attr
+            if dec_name == 'csrf_exempt':
+                self._add("CSRF001", node.lineno, "high", "security", "CSRF protection disabled via csrf_exempt", "Review CSRF protection in this view")
+        self.generic_visit(node)
+        if self._taint:
+            self._taint.end_function()
+        self._taint = None
+
 
     def _snip(self, lineno: int, radius: int = 1) -> str:
         idx = max(0, lineno - 1 - radius)
         end = min(len(self.lines), lineno + radius)
         return "\n".join(self.lines[idx:end])
 
-    def _add(self, pattern_id: str, lineno: int, severity: str, category: str, message: str, suggestion: str):
+    def _add(self, pattern_id: str, lineno: int, severity: str, category: str, message: str, suggestion: Optional[str] = None):
         self.findings.append({
             "id": pattern_id,
             "file": str(self.file_path),
@@ -74,6 +96,19 @@ class _ASTVisitor(ast.NodeVisitor):
 
     # Assignments for secrets (SEC001)
     def visit_Assign(self, node: ast.Assign):
+        taint = self._taint
+        if taint is not None:
+            value = node.value
+            # Source -> taint target variables (enhanced to catch nested source calls)
+            if taint.contains_source_call(value):
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        taint.taint_var(t.id)
+            # Propagate taint through expressions
+            elif taint.has_taint_in_expr(value):
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        taint.taint_var(t.id)
         value = node.value
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             text = value.value.lower()
@@ -85,6 +120,12 @@ class _ASTVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call):
+        taint = self._taint
+        if taint is not None and taint.has_taint_in_args(node) and taint.is_sink_call(node):
+            finding = taint.add_finding(node.lineno, "Taint flow from user input to unsafe sink", "high", "security", "TAINT001", "Sanitize input or avoid tainted data in sink")
+            if finding:
+                self.findings.append(finding)
+        
         # 1) os.system(cmd)
         if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "os" and node.func.attr == "system":
             self._add("PY001", node.lineno, "high", "security", "Use of os.system allows command injection", "Use subprocess.run() with shell=False")
