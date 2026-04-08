@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 import toml
 import json
+from .framework_detector import FrameworkDetector
 
 class ProjectScanner:
     EXTENSION_LANGUAGE_MAP = {
@@ -24,13 +25,15 @@ class ProjectScanner:
     def scan(self) -> Dict[str, Any]:
         files = self._collect_files()
         language = self._detect_language(files)
+        # Framework detection (0.3.0)
+        framework = FrameworkDetector(self.project_path).detect()
         entry_points = self._find_entry_points(language)
         
         return {
             "name": self.project_path.name,
             "path": str(self.project_path),
             "language": language,
-            "framework": "unknown",
+            "framework": framework,
             "files": files,
             "entry_points": entry_points,
             "dependencies": {},

@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.scanner.project_scanner import ProjectScanner
 from src.analyzer.static_analyzer import StaticAnalyzer
+from src.analyzer.framework_analyzer import FrameworkAnalyzer
 from src.llm.code_analyzer import LLMAnalyzer
 from src.report.formatter import ReportFormatter
 from src.config.settings import Settings
@@ -54,6 +55,8 @@ def analyze(path, llm, api_key, no_llm):
     static_results = analyzer.analyze()
     console.print("Found " + str(len(static_results['findings'])) + " issues")
     
+    # 0.3.0: Framework-aware enhancement (detect and analyze framework-specific issues)
+    framework = project_info.get("framework", "unknown")
     if not no_llm:
         console.print("Running LLM analysis (" + llm + ")...")
         llm_analyzer = LLMAnalyzer(settings, llm)
@@ -61,8 +64,17 @@ def analyze(path, llm, api_key, no_llm):
         console.print("LLM analysis complete")
     else:
         llm_results = {"findings": []}
-    
+
     all_findings = static_results["findings"] + llm_results["findings"]
+
+    # 0.3.0: If framework detected, run framework-specific analyzer
+    if framework != "unknown":
+        try:
+            fw = FrameworkAnalyzer(framework, project_path, project_info)
+            fw_results = fw.analyze(static_results)
+            all_findings += fw_results.get("findings", [])
+        except Exception:
+            pass
     
     console.print("\n=== Analysis Complete: " + str(len(all_findings)) + " issues found ===\n")
     

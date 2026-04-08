@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Dict, List, Any
 import re
+from .ast_analyzer import PythonAstAnalyzer
 
 class StaticAnalyzer:
     SECURITY_PATTERNS = [
@@ -23,10 +24,21 @@ class StaticAnalyzer:
     
     def analyze(self) -> Dict[str, Any]:
         findings = []
-        for file_path in self.project_info.get("files", []):
-            file_full_path = self.project_path / file_path
-            findings.extend(self._analyze_file(file_path, file_full_path))
-        return {"findings": findings, "stats": {"total": len(findings), "critical": len([f for f in findings if f["severity"] == "critical"]), "high": len([f for f in findings if f["severity"] == "high"]), "medium": len([f for f in findings if f["severity"] == "medium"]), "low": len([f for f in findings if f["severity"] == "low"])}}
+        language = self.project_info.get("language", "python")
+        if language == "python":
+            try:
+                ast_analyzer = PythonAstAnalyzer(self.project_path, self.project_info)
+                ast_result = ast_analyzer.analyze()
+                findings.extend(ast_result.get("findings", []))
+            except Exception:
+                pass
+        # Fallback to regex-based analysis if AST path fails or language not python
+        if not findings:
+            for file_path in self.project_info.get("files", []):
+                file_full_path = self.project_path / file_path
+                findings.extend(self._analyze_file(file_path, file_full_path))
+        total = len(findings)
+        return {"findings": findings, "stats": {"total": total, "critical": len([f for f in findings if f["severity"] == "critical"]), "high": len([f for f in findings if f["severity"] == "high"]), "medium": len([f for f in findings if f["severity"] == "medium"]), "low": len([f for f in findings if f["severity"] == "low"]) } }
     
     def _analyze_file(self, file_path: str, file_full_path: Path) -> List[Dict]:
         findings = []
