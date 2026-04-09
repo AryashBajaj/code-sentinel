@@ -6,15 +6,16 @@ versions.
 """
 import ast
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from .taint import TaintTracker
 
 
 class PythonAstAnalyzer:
-    def __init__(self, project_path: Path, project_info: Dict[str, Any]):
+    def __init__(self, project_path: Path, project_info: Dict[str, Any], seed_map: Optional[Dict[str, Set[str]]] = None):
         self.project_path = project_path
         self.project_info = project_info
         self.findings: List[Dict[str, Any]] = []
+        self.seed_map: Optional[Dict[str, Set[str]]] = seed_map or None
 
     def analyze(self) -> Dict[str, Any]:
         # Indicate explicitly that the AST-based analysis path is in use (0.2.0)
@@ -36,7 +37,7 @@ class PythonAstAnalyzer:
             except SyntaxError:
                 continue
             lines = source.splitlines()
-            visitor = _ASTVisitor(full_path, lines, self.findings)
+            visitor = _ASTVisitor(full_path, lines, self.findings, taint_seed_map=self.seed_map)
             visitor.visit(tree)
 
         return {"findings": self.findings, "stats": self._compute_stats(self.findings)}
@@ -51,15 +52,21 @@ class PythonAstAnalyzer:
 
 
 class _ASTVisitor(ast.NodeVisitor):
-    def __init__(self, file_path: Path, lines: List[str], findings: List[Dict[str, Any]]):
+    def __init__(self, file_path: Path, lines: List[str], findings: List[Dict[str, Any]], taint_seed_map: Optional[Dict[str, Set[str]]] = None):
         self.file_path = file_path
         self.lines = lines
         self.findings = findings
         self._taint: Optional[TaintTracker] = None
+        self._taint_seed_map: Optional[Dict[str, Set[str]]] = taint_seed_map
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         # Begin a new taint-tracking context for this function
-        self._taint = TaintTracker(self.file_path)
+        # Use resolved absolute path to ensure consistent keys across modules
+        function_key = f"{str(self.file_path.resolve())}:{node.name}"
+        seed = None
+        if self._taint_seed_map and function_key in self._taint_seed_map:
+            seed = self._taint_seed_map[function_key]
+        self._taint = TaintTracker(self.file_path, seed_taint=seed)
         if node.name:
             self._taint.start_function(node.name)
         # CSRF protection check: warn if a view is decorated with csrf_exempt

@@ -20,16 +20,25 @@ Finding = Dict[str, object]
 
 
 class TaintTracker:
-    def __init__(self, file_path: Path):
+    def __init__(self, file_path: Path, seed_taint: Optional[Set[str]] = None):
         self.file_path = Path(file_path)
         self.current_func: Optional[str] = None
-        self.tainted_vars: Set[str] = set()
+        # Initialize taint context with optional seed vars
+        # Keep a separate copy of seeds to reset per function
+        self._seed_vars: Set[str] = set(seed_taint or set())
+        self.tainted_vars: Set[str] = set(self._seed_vars)
+        if seed_taint:
+            try:
+                print(f"[CodeSentinel][TAINT] seed for {self.file_path}: {sorted(list(seed_taint))}")
+            except Exception:
+                print(f"[CodeSentinel][TAINT] seed for {self.file_path}: {seed_taint}")
         self.findings: List[Finding] = []
 
     # --- function/state management ---
     def start_function(self, func_name: str) -> None:
         self.current_func = func_name
-        self.tainted_vars = set()
+        # Reset taint to the original seeds at the start of each function
+        self.tainted_vars = set(self._seed_vars)
 
     def end_function(self) -> None:
         self.current_func = None

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 import re
 from .ast_analyzer import PythonAstAnalyzer
+from .interprocedural_taint import InterproceduralTaintAnalyzer
 
 class StaticAnalyzer:
     SECURITY_PATTERNS = [
@@ -27,9 +28,16 @@ class StaticAnalyzer:
         language = self.project_info.get("language", "python")
         if language == "python":
             try:
-                ast_analyzer = PythonAstAnalyzer(self.project_path, self.project_info)
+                ast_analyzer = PythonAstAnalyzer(self.project_path, self.project_info, seed_map=None)
                 ast_result = ast_analyzer.analyze()
                 findings.extend(ast_result.get("findings", []))
+                # Plan 2: interprocedural taint analysis across modules
+                try:
+                    inter = InterproceduralTaintAnalyzer(self.project_path, self.project_info)
+                    inter_result = inter.analyze()
+                    findings.extend(inter_result.get("findings", []))
+                except Exception:
+                    pass
             except Exception:
                 pass
         # Fallback to regex-based analysis if AST path fails or language not python
