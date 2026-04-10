@@ -68,6 +68,11 @@ class TaintTracker:
         # os.getenv(...)
         if isinstance(f, ast.Attribute) and f.attr == "getenv" and isinstance(f.value, ast.Name) and f.value.id == "os":
             return True
+        # os.environ.get(...) - detect environment-based environments reads
+        if isinstance(f, ast.Attribute) and f.attr == "get" and isinstance(f.value, ast.Attribute):
+            inner = f.value
+            if isinstance(inner.value, ast.Name) and inner.value.id == "os" and inner.attr == "environ":
+                return True
         # os.environ.get(...)
         if isinstance(f, ast.Attribute) and f.attr == "get" and isinstance(f.value, ast.Attribute):
             inner = f.value
