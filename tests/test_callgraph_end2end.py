@@ -2,11 +2,10 @@ import textwrap
 from pathlib import Path
 import sys
 
-# Ensure local path is in sys.path for imports
 BASE = Path(__file__).resolve().parents[1] / 'src'
 sys.path.insert(0, str(BASE))
 
-from callgraph.callgraph import CallGraphBuilder
+from callgraph.dataflow import DataFlowAnalyzer
 
 
 def test_end2end_basic_cross_file(tmp_path: Path):
@@ -24,15 +23,14 @@ def test_end2end_basic_cross_file(tmp_path: Path):
             os.system(param)
     '''))
 
-    cg = CallGraphBuilder(tmp_path)
-    graph = cg.build_graph()
+    analyzer = DataFlowAnalyzer(tmp_path)
+    result = analyzer.analyze()
+    graph = result['graph']
     moduleA = str(a.resolve())
     moduleB = str(b.resolve())
-    # Check modules exist
-    assert any(n for n in graph.nodes.values() if n.id == moduleA and n.type == 'module')
-    assert any(n for n in graph.nodes.values() if n.id == moduleB and n.type == 'module')
-    # Check functions exist
-    assert any(n for n in graph.nodes.values() if n.id == f"{moduleA}::a" and n.type == 'function')
-    assert any(n for n in graph.nodes.values() if n.id == f"{moduleB}::b" and n.type == 'function')
-    # Cross-file edge
-    assert any(e for e in graph.edges if e.src_id == f"{moduleA}::a" and e.dst_id == f"{moduleB}::b" and e.kind == 'CALL')
+
+    assert any(n for n in graph.nodes.values() if n.id == moduleA and n.type == 'module'), "Module A should exist"
+    assert any(n for n in graph.nodes.values() if n.id == moduleB and n.type == 'module'), "Module B should exist"
+    assert any(n for n in graph.nodes.values() if n.id == f"{moduleA}::a" and n.type == 'function'), "Function A should exist"
+    assert any(n for n in graph.nodes.values() if n.id == f"{moduleB}::b" and n.type == 'function'), "Function B should exist"
+    assert any(e for e in graph.edges if e.src_id == f"{moduleA}::a" and e.dst_id == f"{moduleB}::b" and e.kind == 'CALL'), "Cross-file edge should exist"

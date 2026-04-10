@@ -9,11 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from scanner.project_scanner import ProjectScanner
-from callgraph import CallGraphBuilder, analyze_dataflow
+from callgraph import analyze_dataflow
 from analyzer.static_analyzer import StaticAnalyzer
 from analyzer.framework_analyzer import FrameworkAnalyzer
 from llm.code_analyzer import LLMAnalyzer
-from report.formatter import ReportFormatter
 from config.settings import Settings
 
 console = Console()
