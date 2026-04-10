@@ -219,15 +219,3 @@ code-sentinel/
 ├── tests/                  # Test suite
 └── docs/                   # Documentation
 ```
-
-## Configuration
-
-CodeSentinel requires no configuration file for basic usage. For advanced features, see the [review.md](review.md) for implementation details.
-
-## License
-
-MIT License
-
-## Contributing
-
-Contributions welcome! See [review.md](review.md) for technical documentation.
