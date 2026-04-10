@@ -12,6 +12,9 @@ dependencies = [
     "google-genai>=1.0.0",
     "python-dotenv>=1.0.0",
     "toml>=0.10.0",
+    "tree-sitter>=0.21.0,<0.22.0",
+    "tree-sitter-languages>=1.9.0,<1.10.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -25,9 +28,12 @@ dev = [
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+packages = ["src", "src.analyzer", "src.callgraph", "src.config", "src.llm", "src.report", "src.scanner", "src.analyzer.tree_sitter", "src.analyzer.llm", "src.analyzer.rules", "src.analyzer.framework"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [project.scripts]
-code-sentinel = "cli:main"
+code-sentinel = "src.cli:main"
