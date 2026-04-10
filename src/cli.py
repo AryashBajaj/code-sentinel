@@ -10,6 +10,7 @@ os.chdir(Path(__file__).parent)
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.scanner.project_scanner import ProjectScanner
+from callgraph import CallGraphBuilder
 from src.analyzer.static_analyzer import StaticAnalyzer
 from src.analyzer.framework_analyzer import FrameworkAnalyzer
 from src.llm.code_analyzer import LLMAnalyzer
@@ -27,10 +28,12 @@ def main():
 @main.command()
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--llm", type=click.Choice(["gemini", "openai", "anthropic"]), default="gemini",
-              help="LLM provider to use (default: gemini)")
+                help="LLM provider to use (default: gemini)")
 @click.option("--api-key", help="API key for LLM provider (or set GEMINI_API_KEY env var)")
 @click.option("--no-llm", is_flag=True, help="Skip LLM analysis (static only)")
-def analyze(path, llm, api_key, no_llm):
+@click.option("--graph-out", help="Export call graph to path (JSON by default)")
+@click.option("--graph-format", type=click.Choice(["json", "dot"]), default="json", help="Graph export format (default json)")
+def analyze(path, llm, api_key, no_llm, graph_out, graph_format):
     console.print("[bold blue]CodeSentinel[/bold blue] - AI-Powered Code Analysis")
     
     project_path = Path(path).resolve()
@@ -66,6 +69,23 @@ def analyze(path, llm, api_key, no_llm):
         llm_results = {"findings": []}
 
     all_findings = static_results["findings"] + llm_results["findings"]
+
+    # Graph export (end-to-end, production integration)
+    try:
+        if graph_out:
+            graph_builder = CallGraphBuilder(str(project_path))
+            graph = graph_builder.build_graph()
+            # Quick diagnostics to help understand missing edges
+            console.print(f"[GraphStats] nodes={len(graph.nodes)} edges={len(graph.edges)}")
+            if graph_format == "json":
+                graph_text = graph.to_json()
+            else:
+                graph_text = graph.to_dot()
+            Path(graph_out).parent.mkdir(parents=True, exist_ok=True)
+            Path(graph_out).write_text(graph_text, encoding="utf-8")
+            console.print(f"Graph exported to {graph_out} ({graph_format})")
+    except Exception as e:
+        console.print(f"[Warning] Failed to export call graph: {e}")
 
     # 0.3.0: If framework detected, run framework-specific analyzer
     if framework != "unknown":
