@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from scanner.project_scanner import ProjectScanner
 from callgraph import analyze_dataflow
+from callgraph.js_dataflow import analyze_js_dataflow
 from analyzer.static_analyzer import StaticAnalyzer
 from analyzer.framework_analyzer import FrameworkAnalyzer
 from llm.code_analyzer import LLMAnalyzer
@@ -60,11 +61,16 @@ def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format):
     # 0.4.0: Data flow analysis with taint propagation
     dataflow_findings = []
     if dataflow:
+        language = project_info.get('language', 'python')
         console.print("Running data flow analysis...")
         try:
-            df_result = analyze_dataflow(str(project_path))
+            if language in ('javascript', 'typescript'):
+                df_result = analyze_js_dataflow(str(project_path))
+                console.print(f"[JS-DataFlow] nodes={df_result['stats']['nodes']} edges={df_result['stats']['edges']}")
+            else:
+                df_result = analyze_dataflow(str(project_path))
+                console.print(f"[DataFlow] nodes={df_result['stats']['nodes']} edges={df_result['stats']['edges']}")
             dataflow_findings = df_result.get("findings", [])
-            console.print(f"[DataFlow] nodes={df_result['stats']['nodes']} edges={df_result['stats']['edges']}")
             if graph_out:
                 graph = df_result.get("graph")
                 if graph:
@@ -95,9 +101,19 @@ def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format):
         try:
             fw = FrameworkAnalyzer(framework, project_path, project_info)
             fw_results = fw.analyze(static_results)
-            all_findings += fw_results.get("findings", [])
+            all_findings.extend(fw_results.get("findings", []))
         except Exception:
             pass
+    
+    # Deduplicate findings by (file, line, id)
+    seen = set()
+    unique_findings = []
+    for f in all_findings:
+        key = (f.get('file', ''), f.get('line', 0), f.get('id', ''), f.get('message', ''))
+        if key not in seen:
+            seen.add(key)
+            unique_findings.append(f)
+    all_findings = unique_findings
     
     console.print("\n=== Analysis Complete: " + str(len(all_findings)) + " issues found ===\n")
     
