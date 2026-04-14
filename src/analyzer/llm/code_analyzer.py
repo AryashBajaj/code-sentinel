@@ -155,7 +155,6 @@ If no issues found, return: {{"findings": []}}"""
         try:
             cleaned = response.strip()
             
-            # Handle markdown code blocks
             if cleaned.startswith("```"):
                 lines = cleaned.split("\n")
                 if lines[0].strip().startswith("```"):

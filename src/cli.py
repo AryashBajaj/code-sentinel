@@ -14,7 +14,7 @@ from callgraph.js_dataflow import analyze_js_dataflow
 from callgraph.visualize import GraphVisualizer
 from analyzer.static_analyzer import StaticAnalyzer
 from analyzer.framework_analyzer import FrameworkAnalyzer
-from llm.code_analyzer import LLMAnalyzer
+from analyzer.llm import LLMAnalyzer
 from config.settings import Settings
 
 console = Console()
