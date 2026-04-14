@@ -47,3 +47,6 @@ docs/
 # Environment
 .env
 .env.local
+
+# Outputs
+output/
