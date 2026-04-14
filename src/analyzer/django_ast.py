@@ -99,7 +99,7 @@ class DjangoAstVisitor(ast.NodeVisitor, DedupMixin):
         if isinstance(node.targets[0], ast.Name) and node.targets[0].id == "DATABASES":
             if isinstance(node.value, ast.Dict):
                 keys = []
-                for k in node.value.keys():
+                for k in node.value.keys:
                     if isinstance(k, ast.Str): keys.append(k.s)
                     elif isinstance(k, ast.Constant) and isinstance(k.value, str): keys.append(k.value)
                 for k in keys:
@@ -116,27 +116,101 @@ class DjangoAstVisitor(ast.NodeVisitor, DedupMixin):
                 self._add("DJ006", node.lineno, "high", "security", "Django: CSRF exemption", "Require CSRF protection on endpoints")
         self.generic_visit(node)
 
+    def _is_shell_true(self, node: ast.Call) -> bool:
+        for kw in node.keywords:
+            if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                return True
+        return False
+
+    def _is_user_input(self, node: ast.AST) -> bool:
+        src = ast.unparse(node) if hasattr(ast, 'unparse') else ""
+        dangerous = ("request.", "data.get", "request.GET", "request.POST", "request.body")
+        return any(d in src for d in dangerous)
+
+    def _check_dynamic_sql(self, node: ast.Call) -> bool:
+        if not node.args:
+            return False
+        arg0 = node.args[0]
+        if isinstance(arg0, (ast.BinOp, ast.JoinedStr, ast.Call)):
+            return True
+        if isinstance(arg0, ast.Name):
+            return True
+        return False
+
     def visit_Call(self, node: ast.Call):
-        # 1) cursor.execute dynamic SQL
-        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "cursor" and node.func.attr == "execute":
-            if node.args:
-                arg0 = node.args[0]
-                if isinstance(arg0, (ast.BinOp, ast.JoinedStr, ast.Call)):
-                    self._add("DJ001", node.lineno, "high", "security", "Django: risky dynamic SQL construction in cursor.execute", "Use parameterized queries or ORM")
-        # 2) Model.objects.raw
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "raw":
-            self._add("DJ002", node.lineno, "high", "security", "Django: Model.objects.raw used with potential input", "Avoid raw SQL or ensure proper parameterization")
-        # 6) render_template_string
-        if isinstance(node.func, ast.Name) and node.func.id == "render_template_string":
-            self._add("DJ010", self._line_for_node(node), "high", "security", "Django: template injection risk", "Escape inputs; templates")
-        # 9) Logging secrets
-        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id in ("logger","logging"):
-            for a in node.args:
-                if isinstance(a, ast.Constant) and isinstance(a.value, str) and any(w in a.value.lower() for w in ("password","secret","api_key","token")):
-                    self._add("DJ009", self._line_for_node(node), "medium", "security", "Django: sensitive data logged", "Avoid logging credentials")
-        # 12) MD5
-        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "hashlib" and node.func.attr == "md5":
-            self._add("DJ012", self._line_for_node(node), "medium", "security", "Django: MD5 in crypto usage", "Use sha256/Argon2")
-        # 3) SECRET_KEY exposures and 4) DEBUG were handled in Assign; 5-7 handled above
-        # 10) template injection coverage (render_template_string) handled
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            func_name = func.attr
+            func_value = func.value
+            
+            # 1) cursor.execute dynamic SQL
+            if isinstance(func_value, ast.Name) and func_value.id == "cursor" and func_name == "execute":
+                if self._check_dynamic_sql(node):
+                    self._add("DJ001", node.lineno, "critical", "security", "Django: SQL injection via cursor.execute with dynamic query", "Use parameterized queries: cursor.execute(query, [params])")
+            
+            # 2) Model.objects.raw
+            elif func_name == "raw":
+                self._add("DJ002", node.lineno, "high", "security", "Django: Model.objects.raw used with potential user input", "Avoid raw SQL or use ORM with proper sanitization")
+            
+            # 7) Command injection - subprocess.run/call with shell=True
+            elif isinstance(func_value, ast.Name) and func_value.id == "subprocess" and func_name in ("run", "call", "Popen"):
+                if self._is_shell_true(node):
+                    self._add("DJ007", node.lineno, "critical", "security", "Django: Command injection via subprocess with shell=True", "Avoid shell=True; use list args without shell execution")
+            
+            # 11) Path traversal - open() with user input
+            elif func_name == "open" and isinstance(func_value, ast.Name):
+                self._add("DJ011", node.lineno, "high", "security", "Django: Path traversal risk - open() with user input", "Validate and sanitize file paths; use safe file handling")
+
+            # 13) SSRF - requests.get/post with user-controlled URL
+            elif isinstance(func_value, ast.Name) and func_value.id == "requests" and func_name in ("get", "post", "put", "delete", "patch", "request"):
+                self._add("DJ013", node.lineno, "high", "security", "Django: SSRF vulnerability - requests with user-controlled URL", "Validate and whitelist URLs before fetching")
+            
+            # 9) Logging secrets
+            elif isinstance(func_value, ast.Name) and func_value.id in ("logger", "logging"):
+                for a in node.args:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str) and any(w in a.value.lower() for w in ("password", "secret", "api_key", "token")):
+                        self._add("DJ009", self._line_for_node(node), "medium", "security", "Django: sensitive data logged", "Avoid logging credentials")
+            
+            # 12) MD5
+            elif isinstance(func_value, ast.Name) and func_value.id == "hashlib" and func_name == "md5":
+                self._add("DJ012", self._line_for_node(node), "medium", "security", "Django: MD5 in crypto usage", "Use sha256/Argon2 for secure hashing")
+        
+        elif isinstance(func, ast.Name):
+            # 11) Path traversal - open() with file path
+            if func.id == "open":
+                self._add("DJ011", node.lineno, "high", "security", "Django: Path traversal risk - open() with user input", "Validate and sanitize file paths; use safe file handling")
+            
+            # 15) XSS - HttpResponse with user input concatenation
+            elif func.id == "HttpResponse" and node.args:
+                arg_src = ast.unparse(node.args[0]) if hasattr(ast, 'unparse') and node.args else ""
+                if "+" in arg_src or "f\"" in arg_src or "format(" in arg_src:
+                    if any(d in arg_src for d in ("request", "data.get", "query")):
+                        self._add("DJ015", node.lineno, "high", "security", "Django: XSS risk - HttpResponse with concatenated user input", "Use render() with template or escape user input")
+            
+            # 15b) XSS - Template with string concatenation
+            elif func.id == "Template" and node.args:
+                arg_src = ast.unparse(node.args[0]) if hasattr(ast, 'unparse') and node.args else ""
+                if "+" in arg_src:
+                    if any(d in arg_src for d in ("request", "data.get", "query")):
+                        self._add("DJ015", node.lineno, "high", "security", "Django: XSS risk - Template with concatenated user input", "Escape user input before template concatenation")
+            
+            # 14) Code execution - exec/eval
+            elif func.id in ("exec", "eval", "execfile", "compile"):
+                self._add("DJ014", node.lineno, "critical", "security", "Django: Code execution risk via exec/eval", "Avoid exec/eval with user input; use safe evaluation libraries")
+            
+            # 6) render_template_string
+            elif func.id == "render_template_string":
+                self._add("DJ010", self._line_for_node(node), "high", "security", "Django: template injection risk", "Escape inputs; use template engine with auto-escaping")
+        
+        self.generic_visit(node)
+
+    def visit_BinOp(self, node: ast.BinOp):
+        if isinstance(node.op, ast.Add):
+            left_src = ast.unparse(node.left) if hasattr(ast, 'unparse') else ""
+            right_src = ast.unparse(node.right) if hasattr(ast, 'unparse') else ""
+            combined = left_src + right_src
+            user_input_patterns = ("request.", "query", "data.get", "body", "POST", "GET")
+            if any(p in combined for p in user_input_patterns):
+                if any(c in combined for c in ('"', "'", "<", ">", "html", "script", "div", "p>", "h1")):
+                    self._add("DJ015", node.lineno, "high", "security", "Django: XSS risk - string concatenation with user input in HTML context", "Escape user input or use template engine with auto-escaping")
         self.generic_visit(node)

@@ -59,6 +59,9 @@ code-sentinel analyze ./myproject --no-llm
 # With taint tracking enabled
 code-sentinel analyze ./myproject --dataflow
 
+# With taint tracking and visualization
+code-sentinel analyze ./myproject --dataflow --graph-out graph.json --visualise
+
 # Export call graph
 code-sentinel analyze ./myproject --dataflow --graph-out output.json
 ```
@@ -79,6 +82,7 @@ code-sentinel analyze <path> [options]
 | `--dataflow` | Enable taint tracking analysis |
 | `--graph-out <path>` | Export call graph to file |
 | `--graph-format {json\|dot}` | Graph export format |
+| `--visualise` | Generate interactive HTML visualization (requires --dataflow and --graph-out) |
 
 ### Detect Command
 
@@ -175,6 +179,34 @@ process.env       ──┐  │      innerHTML
 
 [HIGH] utils/auth.py:67 - Taint flow: user input reaches dangerous sink exec
   => Sanitize input or use safer alternative
+```
+
+## Call Graph Visualization
+
+Generate interactive HTML visualizations of the call graph with D3.js:
+
+```bash
+code-sentinel analyze ./myproject --dataflow --graph-out graph.json --visualise
+```
+
+This generates an interactive HTML file (`graph.html`) that you can open in a browser.
+
+### Features
+
+- **Force-directed graph**: Nodes and edges arranged automatically using D3.js physics simulation
+- **Topological sorting**: Entry points (routes, handlers, main functions) appear first
+- **Interactive**: Drag nodes, zoom, pan, and search
+- **Color-coded**: Nodes colored by type (entry points, handlers, API, services, models)
+- **Hover details**: See file path, line number, callers, and callees
+- **Filter**: Toggle visibility by node type
+- **Search**: Filter nodes by name or path
+
+### Example
+
+```
+# Generate visualization for a Next.js project
+code-sentinel analyze ./nextjs-app --dataflow --graph-out callgraph.json --visualise
+# Opens: callgraph.html
 ```
 
 ## Rule Categories

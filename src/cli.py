@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from scanner.project_scanner import ProjectScanner
 from callgraph import analyze_dataflow
 from callgraph.js_dataflow import analyze_js_dataflow
+from callgraph.visualize import GraphVisualizer
 from analyzer.static_analyzer import StaticAnalyzer
 from analyzer.framework_analyzer import FrameworkAnalyzer
 from llm.code_analyzer import LLMAnalyzer
@@ -33,7 +34,8 @@ def main():
 @click.option("--dataflow", is_flag=True, help="Enable data flow analysis (taint propagation)")
 @click.option("--graph-out", help="Export call graph to path (JSON by default)")
 @click.option("--graph-format", type=click.Choice(["json", "dot"]), default="json", help="Graph export format (default json)")
-def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format):
+@click.option("--visualise", "visualize", is_flag=True, help="Generate interactive HTML visualization (requires --dataflow and --graph-out)")
+def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format, visualize):
     console.print("[bold blue]CodeSentinel[/bold blue] - AI-Powered Code Analysis")
     
     project_path = Path(path).resolve()
@@ -83,6 +85,24 @@ def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format):
                     console.print(f"Graph exported to {graph_out}")
         except Exception as e:
             console.print(f"[Warning] Data flow analysis failed: {e}")
+    
+    # Visualization generation (requires --dataflow and --graph-out)
+    if visualize:
+        if not dataflow:
+            console.print("[red]Error: --visualise requires --dataflow flag[/red]")
+            return
+        if not graph_out:
+            console.print("[red]Error: --visualise requires --graph-out path[/red]")
+            return
+        
+        try:
+            console.print("Generating visualization...")
+            viz = GraphVisualizer(graph_out)
+            html_path = str(Path(graph_out).with_suffix('.html'))
+            viz.visualize(html_path)
+            console.print(f"[green]Visualization saved to {html_path}[/green]")
+        except Exception as e:
+            console.print(f"[Warning] Visualization failed: {e}")
     
     # 0.3.0: Framework-aware enhancement (detect and analyze framework-specific issues)
     framework = project_info.get("framework", "unknown")
