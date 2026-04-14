@@ -195,19 +195,9 @@ This generates an interactive HTML file (`graph.html`) that you can open in a br
 
 - **Force-directed graph**: Nodes and edges arranged automatically using D3.js physics simulation
 - **Topological sorting**: Entry points (routes, handlers, main functions) appear first
-- **Interactive**: Drag nodes, zoom, pan, and search
-- **Color-coded**: Nodes colored by type (entry points, handlers, API, services, models)
 - **Hover details**: See file path, line number, callers, and callees
 - **Filter**: Toggle visibility by node type
-- **Search**: Filter nodes by name or path
-
-### Example
-
-```
-# Generate visualization for a Next.js project
-code-sentinel analyze ./nextjs-app --dataflow --graph-out callgraph.json --visualise
-# Opens: callgraph.html
-```
+- **Search**: Filter nodes by name
 
 ## Rule Categories
 
