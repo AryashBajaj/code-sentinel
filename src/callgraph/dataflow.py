@@ -89,9 +89,8 @@ class DataFlowAnalyzer:
             if call.callee_name in self.TAINTED_SOURCE_FUNCTIONS:
                 return True
         
-        # Check if function has Request parameter (FastAPI/web input)
         for param in func.parameters:
-            if param.name in ('request', 'req', 'data', 'body'):
+            if param.name in ('request', 'req', 'body'):
                 return True
         
         return False
