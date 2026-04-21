@@ -13,6 +13,7 @@ class Node:
     path: str
     line_start: Optional[int] = None
     line_end: Optional[int] = None
+    findings: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -22,6 +23,8 @@ class Edge:
     dst_id: str
     kind: str  # e.g. 'CALL' or 'IMPORT'
     line: Optional[int] = None
+    is_tainted: bool = False
+    taint_source: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -46,6 +49,7 @@ class Graph:
                     "path": n.path,
                     "line_start": n.line_start,
                     "line_end": n.line_end,
+                    "findings": n.findings,
                     "metadata": n.metadata,
                 }
                 for n in self.nodes.values()
@@ -56,6 +60,8 @@ class Graph:
                     "dst_id": e.dst_id,
                     "kind": e.kind,
                     "line": e.line,
+                    "is_tainted": e.is_tainted,
+                    "taint_source": e.taint_source,
                     "metadata": e.metadata,
                 }
                 for e in self.edges

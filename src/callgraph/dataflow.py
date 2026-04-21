@@ -24,6 +24,12 @@ class DataFlowAnalyzer:
         'input': True,
         'getenv': True,
         'environ.get': True,
+        'request': True,
+        'request.json': True,
+        'request.body': True,
+        'request.form': True,
+        'request.query_params': True,
+        'request.headers': True,
     }
     
     KNOWN_TAINTED_RETURN_FUNCTIONS = {
@@ -49,6 +55,7 @@ class DataFlowAnalyzer:
         self.findings: List[Dict] = []
         self.tainted_funcs: Set[str] = set()
         self.uses_tainted_return: Set[str] = set()
+        self.taint_propagation_paths: Dict[str, str] = {}  # func_key -> source_key
     
     def analyze(self) -> Dict:
         self.modules = self.ir_builder.build()
@@ -80,6 +87,11 @@ class DataFlowAnalyzer:
         
         for call in func.calls:
             if call.callee_name in self.TAINTED_SOURCE_FUNCTIONS:
+                return True
+        
+        # Check if function has Request parameter (FastAPI/web input)
+        for param in func.parameters:
+            if param.name in ('request', 'req', 'data', 'body'):
                 return True
         
         return False
@@ -196,10 +208,22 @@ class DataFlowAnalyzer:
                     
                     if tainted_callers:
                         self.tainted_funcs.add(key)
+                        self.taint_propagation_paths[key] = tainted_callers[0]
+                        self._mark_taint_path(key, tainted_callers[0])
                         changed = True
                     elif key in self.uses_tainted_return and self._can_chain_taint(key):
                         self.tainted_funcs.add(key)
                         changed = True
+    
+    def _mark_taint_path(self, func_key: str, source_key: str) -> None:
+        if func_key in self.graph.nodes:
+            self.graph.nodes[func_key].metadata['is_tainted'] = True
+            self.graph.nodes[func_key].metadata['taint_source'] = source_key
+        
+        for edge in self.graph.edges:
+            if edge.dst_id == func_key:
+                edge.is_tainted = True
+                edge.taint_source = source_key
     
     def _get_callers(self, func_key: str) -> List[str]:
         callers = []
@@ -239,17 +263,32 @@ class DataFlowAnalyzer:
             for call in func.calls:
                 if self._is_dangerous_sink(call.callee_name):
                     severity = self.DANGEROUS_SINKS.get(call.callee_name, 'high')
+                    sink_name = call.callee_name
                     
-                    self.findings.append({
+                    taint_finding = {
                         'id': 'TAINT001',
                         'file': func.file_path,
                         'line': call.lineno,
                         'severity': severity,
                         'category': 'security',
-                        'message': f'Taint flow: user-controlled data from source() reaches sink {call.callee_name}',
+                        'message': f'Taint flow: user-controlled data from source() reaches sink {sink_name}',
                         'suggestion': 'Sanitize input or use safer alternative',
-                        'matched_code': f'{call.callee_name}(...)'
-                    })
+                        'matched_code': f'{sink_name}(...)',
+                        'is_taint_finding': True,
+                    }
+                    self.findings.append(taint_finding)
+                    
+                    # Mark the function as tainted
+                    if key in self.graph.nodes:
+                        self.graph.nodes[key].metadata['is_tainted'] = True
+                    
+                    # Mark all incoming edges to this function as tainted (the path)
+                    for edge in self.graph.edges:
+                        if edge.dst_id == key:
+                            edge.is_tainted = True
+                        if edge.src_id == key and edge.line == call.lineno:
+                            edge.is_tainted = True
+                            edge.metadata['finding'] = taint_finding
     
     def _is_dangerous_sink(self, callee_name: str) -> bool:
         return callee_name in self.DANGEROUS_SINKS

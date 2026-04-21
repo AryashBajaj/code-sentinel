@@ -5,6 +5,7 @@ from rich.panel import Panel
 import sys
 import os
 from pathlib import Path
+from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -18,6 +19,63 @@ from analyzer.llm import LLMAnalyzer
 from config.settings import Settings
 
 console = Console()
+
+
+def map_findings_to_nodes(findings, graph):
+    """Map findings to graph nodes based on file and line matching."""
+    if not graph or not findings:
+        return graph
+    
+    # Group findings by filename (handle both relative and absolute paths)
+    findings_by_file = defaultdict(list)
+    for f in findings:
+        file_path = f.get('file', '')
+        if file_path:
+            # Normalize to just filename
+            filename = file_path.replace('\\', '/').split('/')[-1]
+            findings_by_file[filename].append(f)
+            # Also store by full path if absolute
+            findings_by_file[file_path].append(f)
+    
+    for node in graph.nodes.values():
+        if node.type == 'module':
+            continue
+        
+        node_path = node.path
+        # Try exact match first
+        file_findings = findings_by_file.get(node_path, [])
+        
+        # Try filename match
+        if not file_findings:
+            node_filename = node_path.replace('\\', '/').split('/')[-1]
+            file_findings = findings_by_file.get(node_filename, [])
+        
+        if not file_findings:
+            # Check if any finding's file is contained in node path (for absolute paths)
+            for finding_file, f_list in findings_by_file.items():
+                if finding_file in node_path:
+                    file_findings.extend(f_list)
+                    break
+        
+        if not file_findings:
+            continue
+        
+        node_line = node.line_start or 0
+        matched_findings = []
+        
+        for cf in file_findings:
+            finding_line = cf.get('line', 0)
+            if finding_line == node_line:
+                matched_findings.append(cf)
+            elif node_line > 0 and finding_line > 0:
+                line_diff = abs(finding_line - node_line)
+                if line_diff <= 10:
+                    matched_findings.append(cf)
+        
+        if matched_findings:
+            node.findings = matched_findings
+    
+    return graph
 
 @click.group()
 @click.version_option(version="0.1.0")
@@ -62,6 +120,7 @@ def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format, visua
     
     # 0.4.0: Data flow analysis with taint propagation
     dataflow_findings = []
+    dataflow_graph = None
     if dataflow:
         language = project_info.get('language', 'python')
         console.print("Running data flow analysis...")
@@ -73,36 +132,9 @@ def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format, visua
                 df_result = analyze_dataflow(str(project_path))
                 console.print(f"[DataFlow] nodes={df_result['stats']['nodes']} edges={df_result['stats']['edges']}")
             dataflow_findings = df_result.get("findings", [])
-            if graph_out:
-                graph = df_result.get("graph")
-                if graph:
-                    if graph_format == "json":
-                        graph_text = graph.to_json()
-                    else:
-                        graph_text = graph.to_dot()
-                    Path(graph_out).parent.mkdir(parents=True, exist_ok=True)
-                    Path(graph_out).write_text(graph_text, encoding="utf-8")
-                    console.print(f"Graph exported to {graph_out}")
+            dataflow_graph = df_result.get("graph")
         except Exception as e:
             console.print(f"[Warning] Data flow analysis failed: {e}")
-    
-    # Visualization generation (requires --dataflow and --graph-out)
-    if visualize:
-        if not dataflow:
-            console.print("[red]Error: --visualise requires --dataflow flag[/red]")
-            return
-        if not graph_out:
-            console.print("[red]Error: --visualise requires --graph-out path[/red]")
-            return
-        
-        try:
-            console.print("Generating visualization...")
-            viz = GraphVisualizer(graph_out)
-            html_path = str(Path(graph_out).with_suffix('.html'))
-            viz.visualize(html_path)
-            console.print(f"[green]Visualization saved to {html_path}[/green]")
-        except Exception as e:
-            console.print(f"[Warning] Visualization failed: {e}")
     
     # 0.3.0: Framework-aware enhancement (detect and analyze framework-specific issues)
     framework = project_info.get("framework", "unknown")
@@ -135,13 +167,55 @@ def analyze(path, llm, api_key, no_llm, dataflow, graph_out, graph_format, visua
             unique_findings.append(f)
     all_findings = unique_findings
     
+    # Export graph with findings mapped to nodes
+    if graph_out and dataflow_graph:
+        try:
+            dataflow_graph = map_findings_to_nodes(all_findings, dataflow_graph)
+            if graph_format == "json":
+                graph_text = dataflow_graph.to_json()
+            else:
+                graph_text = dataflow_graph.to_dot()
+            Path(graph_out).parent.mkdir(parents=True, exist_ok=True)
+            Path(graph_out).write_text(graph_text, encoding="utf-8")
+            console.print(f"Graph exported to {graph_out}")
+        except Exception as e:
+            console.print(f"[Warning] Graph export failed: {e}")
+    
+    if visualize and graph_out:
+        try:
+            console.print("Generating visualization...")
+            html_path = str(Path(graph_out).with_suffix('.html'))
+            viz = GraphVisualizer(str(graph_out))
+            viz.visualize(html_path)
+            console.print(f"[green]Visualization saved to {html_path}[/green]")
+        except Exception as e:
+            console.print(f"[Warning] Visualization failed: {e}")
+    
     console.print("\n=== Analysis Complete: " + str(len(all_findings)) + " issues found ===\n")
     
     for finding in all_findings:
         sev = finding.get("severity", "low")
-        console.print("[" + sev.upper() + "] " + finding.get('file', 'unknown') + ":" + str(finding.get('line', 0)) + " - " + finding.get('message', ''))
+        file_path = finding.get('file', 'unknown')
+        line_num = finding.get('line', 0)
+        msg = finding.get('message', '')
+        fid = finding.get('id', '')
+        
+        if sev == 'critical':
+            console.print(f"[bold red][[{fid}][CRITICAL]][/bold red] {file_path}:{line_num}")
+            console.print(f"  [red]>> {msg}[/red]")
+        elif sev == 'high':
+            console.print(f"[bold orange1][[{fid}][HIGH]][/bold orange1] {file_path}:{line_num}")
+            console.print(f"  [orange1]>> {msg}[/orange1]")
+        elif sev == 'medium':
+            console.print(f"[bold yellow][[{fid}][MEDIUM]][/bold yellow] {file_path}:{line_num}")
+            console.print(f"  [yellow]>> {msg}[/yellow]")
+        else:
+            console.print(f"[[{fid}][LOW]] {file_path}:{line_num}")
+            console.print(f"  >> {msg}")
+        
         if finding.get("suggestion"):
-            console.print("  => " + finding['suggestion'])
+            console.print(f"  => {finding['suggestion']}")
+        console.print()
 
 @main.command()
 @click.argument("path", type=click.Path(exists=True))
